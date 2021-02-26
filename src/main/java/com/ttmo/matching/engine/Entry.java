@@ -1,12 +1,16 @@
 package com.ttmo.matching.engine;
 
 import com.ttmo.matching.enums.OrderSide;
+import com.ttmo.matching.support.Marker;
+import com.ttmo.matching.support.Message;
 import com.ttmo.matching.support.Order;
+import com.ttmo.matching.support.Trade;
 import lombok.RequiredArgsConstructor;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 
 /**
@@ -23,9 +27,16 @@ public class Entry {
     @Nonnull
     final BlockingQueue<Order> orderQueue;
 
+    @Nonnull
+    final Message message;
+
     @Nullable
     final BigDecimal lastPrice;
 
+    /**
+     * 开启撮合入口, 分发挂单事件
+     * <p>使用 {@link #orderQueue} 接收挂单推送
+     */
     public void start() {
         for (; ; ) {
             Order order = orderQueue.poll();
@@ -44,6 +55,9 @@ public class Entry {
         }
     }
 
+    /**
+     * 创建挂单
+     */
     private void create(@Nonnull Order order) {
         switch (order.getType()) {
             case LIMIT:
@@ -57,27 +71,60 @@ public class Entry {
         }
     }
 
+    /**
+     * 取消挂单
+     */
     private void cancel(@Nonnull Order order) {
+        Marker marker;
         if (order.getSide() == OrderSide.SIDE_BUY) {
-            limitOrderPool.removeBuyOrder(order);
+            marker = limitOrderPool.removeBuyOrder(order);
         } else {
-            limitOrderPool.removeSellOrder(order);
+            marker = limitOrderPool.removeSellOrder(order);
+        }
+        if (marker != null) {
+            message.completedCancelOrder(marker);
         }
     }
 
+    /**
+     * 处理限价单
+     */
     private void dealLimit(@Nonnull Order order) {
+        List<Trade> trades;
+
         if (order.getSide() == OrderSide.SIDE_BUY) {
-            limitOrderPool.dealLimitBuy(order);
+            trades = limitOrderPool.dealLimitBuy(order);
         } else {
-            limitOrderPool.dealLimitSell(order);
+            trades = limitOrderPool.dealLimitSell(order);
+        }
+
+        for (Trade trade : trades) {
+            message.completedTraded(trade, order);
         }
     }
 
+    /**
+     * 处理市价单
+     */
     private void dealMarket(@Nonnull Order order) {
+        List<Trade> trades;
+
         if (order.getSide() == OrderSide.SIDE_BUY) {
-            limitOrderPool.dealMarketBuy(order);
+            trades = limitOrderPool.dealMarketBuy(order);
+            // 小概率事件
+            if (order.getPrice().compareTo(BigDecimal.ZERO) > 0) {
+                message.completedCancelOrder(order);
+            }
         } else {
-            limitOrderPool.dealMarketSell(order);
+            trades = limitOrderPool.dealMarketSell(order);
+            // 小概率事件
+            if (order.getAmount().compareTo(BigDecimal.ZERO) > 0) {
+                message.completedCancelOrder(order);
+            }
+        }
+
+        for (Trade trade : trades) {
+            message.completedTraded(trade, order);
         }
     }
 

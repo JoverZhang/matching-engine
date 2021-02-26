@@ -26,7 +26,7 @@ public class OrderPoolLuaHelper {
 
     private static final DefaultRedisScript<Long> ADD_ORDER;
 
-    private static final DefaultRedisScript<Long> REMOVE_ORDER;
+    private static final DefaultRedisScript<String> REMOVE_ORDER;
 
     private static final DefaultRedisScript<Long> UPDATE_ORDER;
 
@@ -40,8 +40,8 @@ public class OrderPoolLuaHelper {
             setResultType(Long.class);
             setScriptSource(new ResourceScriptSource(new ClassPathResource("/lua/limit_order_pool/add_order.lua")));
         }};
-        REMOVE_ORDER = new DefaultRedisScript<Long>() {{
-            setResultType(Long.class);
+        REMOVE_ORDER = new DefaultRedisScript<String>() {{
+            setResultType(String.class);
             setScriptSource(new ResourceScriptSource(new ClassPathResource("/lua/limit_order_pool/remove_order.lua")));
         }};
         UPDATE_ORDER = new DefaultRedisScript<Long>() {{
@@ -60,16 +60,6 @@ public class OrderPoolLuaHelper {
 
     final StringRedisTemplate redisTemplate;
 
-    public static Marker decodeMarker(@Nonnull String markerStr) {
-        String[] markerInfo = markerStr.split(",");
-        Assert.isTrue(markerInfo.length == 3);
-        return Marker.builder()
-                .id(markerInfo[0])
-                .price(new BigDecimal(markerInfo[1]))
-                .amount(new BigDecimal(markerInfo[2]))
-                .build();
-    }
-
     public void addOrder(String poolName, OrderSide side, Marker order) {
         String isBuy = side == OrderSide.SIDE_BUY ? "buy" : "sell";
         redisTemplate.execute(ADD_ORDER,
@@ -78,12 +68,14 @@ public class OrderPoolLuaHelper {
                 order.getPrice().toPlainString(), order.getAmount().toPlainString());
     }
 
-    public void removeOrder(String poolName, OrderSide side, Marker order) {
-        String isBuy = side == OrderSide.SIDE_BUY ? "buy" : "sell";
-        redisTemplate.execute(REMOVE_ORDER,
-                Arrays.asList("poolName", "isBuy", "id", "price", "amount"),
-                poolName, isBuy, order.getId(),
-                order.getPrice().toPlainString(), order.getAmount().toPlainString());
+    private static Marker decodeMarker(@Nonnull String markerStr) {
+        String[] markerInfo = markerStr.split(",");
+        Assert.isTrue(markerInfo.length == 3);
+        return Marker.builder()
+                .id(markerInfo[0])
+                .price(new BigDecimal(markerInfo[1]))
+                .amount(new BigDecimal(markerInfo[2]))
+                .build();
     }
 
     public Marker peekFirst(String poolName, OrderSide side) {
@@ -101,6 +93,18 @@ public class OrderPoolLuaHelper {
         redisTemplate.execute(UPDATE_ORDER, Arrays.asList("poolName", "id", "price", "amount"),
                 poolName, order.getId(),
                 order.getPrice().toPlainString(), order.getAmount().toPlainString());
+    }
+
+    public Marker removeOrder(String poolName, OrderSide side, Marker order) {
+        String isBuy = side == OrderSide.SIDE_BUY ? "buy" : "sell";
+        String markerStr = redisTemplate.execute(REMOVE_ORDER,
+                Arrays.asList("poolName", "isBuy", "id", "price", "amount"),
+                poolName, isBuy, order.getId(),
+                order.getPrice().toPlainString(), order.getAmount().toPlainString());
+        if (markerStr == null) {
+            return null;
+        }
+        return decodeMarker(markerStr);
     }
 
     /**

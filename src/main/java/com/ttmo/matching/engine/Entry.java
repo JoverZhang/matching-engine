@@ -82,7 +82,7 @@ public class Entry {
             marker = limitOrderPool.removeSellOrder(order);
         }
         if (marker != null) {
-            message.completedCancelOrder(marker);
+            message.successCancelOrder(marker);
         }
     }
 
@@ -99,7 +99,7 @@ public class Entry {
         }
 
         for (Trade trade : trades) {
-            message.completedTraded(trade, order);
+            message.successTraded(trade, order);
         }
     }
 
@@ -113,18 +113,18 @@ public class Entry {
             trades = limitOrderPool.dealMarketBuy(order);
             // 小概率事件
             if (order.getPrice().compareTo(BigDecimal.ZERO) > 0) {
-                message.completedCancelOrder(order);
+                message.successCancelOrder(order);
             }
         } else {
             trades = limitOrderPool.dealMarketSell(order);
             // 小概率事件
             if (order.getAmount().compareTo(BigDecimal.ZERO) > 0) {
-                message.completedCancelOrder(order);
+                message.successCancelOrder(order);
             }
         }
 
         for (Trade trade : trades) {
-            message.completedTraded(trade, order);
+            message.successTraded(trade, order);
         }
     }
 

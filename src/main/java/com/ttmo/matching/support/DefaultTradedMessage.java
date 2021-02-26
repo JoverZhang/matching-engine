@@ -8,12 +8,12 @@ package com.ttmo.matching.support;
 public class DefaultTradedMessage implements Message {
 
     @Override
-    public void completedTraded(Trade trade, Order order) {
+    public void successTraded(Trade trade, Order order) {
         System.out.println("trade = " + trade + ", order = " + order);
     }
 
     @Override
-    public void completedCancelOrder(Marker order) {
+    public void successCancelOrder(Marker order) {
         System.out.println("cancel order = " + order);
     }
 

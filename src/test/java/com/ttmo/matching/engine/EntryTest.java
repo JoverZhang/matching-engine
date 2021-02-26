@@ -47,7 +47,7 @@ class EntryTest extends Assertions {
         LinkedBlockingQueue<Order> queue = new LinkedBlockingQueue<>();
         Message message = new Message() {
             @Override
-            public void completedTraded(Trade trade, Order order) {
+            public void successTraded(Trade trade, Order order) {
                 if (counts[0]++ % 1000 == 0) {
                     System.out.println("traded 1000, used: " +
                             (~(preTimes[0] - (preTimes[0] = System.currentTimeMillis())) + 1));
@@ -55,7 +55,7 @@ class EntryTest extends Assertions {
             }
 
             @Override
-            public void completedCancelOrder(Marker order) {
+            public void successCancelOrder(Marker order) {
                 if (counts[1]++ % 1000 == 0) {
                     System.out.println("canceled 1000");
                 }

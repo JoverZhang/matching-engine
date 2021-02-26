@@ -6,18 +6,29 @@ import com.ttmo.matching.engine.lua.OrderPoolLuaHelper;
 import com.ttmo.matching.enums.OrderAction;
 import com.ttmo.matching.enums.OrderSide;
 import com.ttmo.matching.enums.OrderType;
+import com.ttmo.matching.support.Marker;
+import com.ttmo.matching.support.Message;
 import com.ttmo.matching.support.Order;
+import com.ttmo.matching.support.Trade;
 import lombok.Builder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+
+import static com.ttmo.matching.enums.OrderSide.SIDE_BUY;
+import static com.ttmo.matching.enums.OrderSide.SIDE_SELL;
+import static com.ttmo.matching.enums.OrderType.LIMIT;
+import static com.ttmo.matching.enums.OrderType.MARKET;
 
 @SpringBootTest(classes = MatchingApplicationTests.class)
 class EntryTest extends Assertions {
@@ -25,60 +36,71 @@ class EntryTest extends Assertions {
     @Autowired
     StringRedisTemplate redisTemplate;
 
+    final int PRECISION = 6;
+
     @Test
-    void start() throws InterruptedException {
-        OrderPoolLuaHelper helper = new OrderPoolLuaHelper(redisTemplate);
+    void stressTesting() {
+        final int END_COUNT = 5000;
+        int[] counts = {0, 0};
+        final long[] preTimes = {0};
 
         LinkedBlockingQueue<Order> queue = new LinkedBlockingQueue<>();
+        Message message = new Message() {
+            @Override
+            public void completedTraded(Trade trade, Order order) {
+                if (counts[0]++ % 1000 == 0) {
+                    System.out.println("traded 1000, used: " +
+                            (~(preTimes[0] - (preTimes[0] = System.currentTimeMillis())) + 1));
+                }
+            }
 
-        Entry entry = new Entry(new LimitOrderPool(helper, new TradedMessage(), 6), queue, null);
-        Thread thread = new Thread(() -> entry.start());
-        thread.start();
+            @Override
+            public void completedCancelOrder(Marker order) {
+                if (counts[1]++ % 1000 == 0) {
+                    System.out.println("canceled 1000");
+                }
+            }
+        };
 
-//        List<Order> orders = OrderRandomizer.builder()
-//                .numberOfPrice(100)
-//                .numberOfSamePrice(100)
-//                .priceRandomizer(new Randomizer("0.0001", "100000", 4))
-//                .amountRandomizer(new Randomizer("0.0001", "100000", 4))
-//                .build().get(OrderType.LIMIT, OrderSide.SIDE_SELL);
-//        orders.addAll(OrderRandomizer.builder()
-//                .numberOfPrice(100)
-//                .numberOfSamePrice(100)
-//                .priceRandomizer(new Randomizer("0.0001", "100000", 4))
-//                .amountRandomizer(new Randomizer("0.0001", "100000", 4))
-//                .build().get(OrderType.LIMIT, OrderSide.SIDE_BUY));
-//
-//        System.out.println("orders.size() = " + orders.size());
-//        new HashSet<>(orders).forEach(queue::offer);
+        new Thread(() ->
+                new Entry(new DefaultLimitOrderPool(
+                        new OrderPoolLuaHelper(redisTemplate), PRECISION),
+                        queue, message, null)
+                        .start())
+                .start();
 
-//        queue.offer(Order.builder()
-//                .id("1")
-//                .price(new BigDecimal("999"))
-//                .amount(new BigDecimal("100"))
-//                .type(OrderType.LIMIT)
-//                .side(OrderSide.SIDE_BUY)
-//                .action(OrderAction.CREATE)
-//                .build());
-//        queue.offer(Order.builder()
-//                .id("2")
-//                .price(new BigDecimal("1"))
-//                .amount(new BigDecimal("200"))
-//                .type(OrderType.LIMIT)
-//                .side(OrderSide.SIDE_BUY)
-//                .action(OrderAction.CREATE)
-//                .build());
-        queue.offer(Order.builder()
-                .id("3")
-//                .price(new BigDecimal("30"))
-                .amount(new BigDecimal("301"))
-                .type(OrderType.MARKET)
-                .side(OrderSide.SIDE_SELL)
-                .action(OrderAction.CREATE)
-                .build());
+        List<Order> orders = OrderRandomizer.builder()
+                .numberOfPrice(100)
+                .numberOfSamePrice(100)
+                .priceRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .amountRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .build().get(LIMIT, SIDE_BUY);
+        orders.addAll(OrderRandomizer.builder()
+                .numberOfPrice(100)
+                .numberOfSamePrice(100)
+                .priceRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .amountRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .build().get(LIMIT, SIDE_SELL));
+        orders.addAll(OrderRandomizer.builder()
+                .numberOfPrice(100)
+                .numberOfSamePrice(100)
+                .priceRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .build().get(MARKET, SIDE_BUY));
+        orders.addAll(OrderRandomizer.builder()
+                .numberOfPrice(100)
+                .numberOfSamePrice(100)
+                .amountRandomizer(new Randomizer("0.0001", "100000", PRECISION))
+                .build().get(MARKET, SIDE_SELL));
 
+        new HashSet<>(orders).forEach(queue::offer);
+        while (counts[0] < END_COUNT) {
+            Thread.yield();
+        }
+    }
 
-        System.out.println("end");
-        thread.join();
+    @AfterEach
+    void after() {
+        redisTemplate.execute((RedisCallback<Object>) connection -> connection.execute("FLUSHALL"));
     }
 
     @Builder
@@ -111,7 +133,7 @@ class EntryTest extends Assertions {
             assertTrue(numberOfPrice > 0);
             return new LinkedList<Order>() {{
                 for (int i = 0; i < numberOfPrice; i++) {
-                    BigDecimal price = priceRandomizer.getBigDecimal();
+                    BigDecimal price = priceRandomizer == null ? null : priceRandomizer.getBigDecimal();
                     int count = numberOfSamePriceRandomizer != null ?
                             numberOfSamePriceRandomizer.getInt() :
                             numberOfSamePrice;
@@ -119,7 +141,7 @@ class EntryTest extends Assertions {
                         add(Order.builder()
                                 .id(i + ":" + j)
                                 .price(price)
-                                .amount(amountRandomizer.getBigDecimal())
+                                .amount(amountRandomizer == null ? null : amountRandomizer.getBigDecimal())
                                 .build());
                     }
                 }
